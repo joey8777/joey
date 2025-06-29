@@ -1,0 +1,83 @@
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import pandas as pd
+import yfinance as yf
+import datetime
+
+# 你的 Gmail 設定
+GMAIL_USER = "zxc990503@gmail.com"
+GMAIL_APP_PASSWORD = "tvst cwan yyhl nfaa"
+
+# 多個收件人，用英文逗號隔開
+RECEIVER_EMAILS = "zxc990503@gmail.com,chiaoi_peng@megasec.com.tw"
+
+def send_email(subject, body):
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_USER
+    receivers = [email.strip() for email in RECEIVER_EMAILS.split(",")]
+    msg["To"] = ", ".join(receivers)
+    msg["Subject"] = subject
+
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_USER, receivers, msg.as_string())
+
+def calculate_macd(df):
+    df['EMA12'] = df['Close'].ewm(span=12).mean()
+    df['EMA26'] = df['Close'].ewm(span=26).mean()
+    df['DIF'] = df['EMA12'] - df['EMA26']
+    df['MACD'] = df['DIF'].ewm(span=9).mean()
+    return df
+
+def is_golden_cross(yesterday, today_data):
+    dif_y = yesterday['DIF']
+    macd_y = yesterday['MACD']
+    dif_t = today_data['DIF']
+    macd_t = today_data['MACD']
+    if hasattr(dif_y, "values"):
+        dif_y = dif_y.values[0]
+    if hasattr(macd_y, "values"):
+        macd_y = macd_y.values[0]
+    if hasattr(dif_t, "values"):
+        dif_t = dif_t.values[0]
+    if hasattr(macd_t, "values"):
+        macd_t = macd_t.values[0]
+    return (dif_y < macd_y) and (dif_t > macd_t)
+
+def main():
+    twse_symbols = ['0050', '2330', '2317', '2303', '2412']
+    today = datetime.date.today().isoformat()
+    golden_crosses = []
+
+    for symbol in twse_symbols:
+        full_symbol = symbol + '.TW'
+        try:
+            df = yf.download(full_symbol, period='10d', interval='1d', progress=False, auto_adjust=True)
+            if len(df) < 2:
+                continue
+
+            df = calculate_macd(df)
+
+            yesterday = df.iloc[-2]
+            today_data = df.iloc[-1]
+
+            if is_golden_cross(yesterday, today_data):
+                diff_percent = (today_data['DIF'] - today_data['MACD']) / abs(today_data['MACD']) * 100 if today_data['MACD'] != 0 else 0
+                golden_crosses.append(f"{symbol} 收盤價: {today_data['Close']:.2f} 差距%: {diff_percent:.2f}")
+
+        except Exception as e:
+            print(f"錯誤：{symbol} - {e}")
+
+    if golden_crosses:
+        body = "📈 今日MACD黃金交叉股票：\n" + "\n".join(golden_crosses)
+    else:
+        body = "❌ 今日沒有MACD黃金交叉的股票"
+
+    send_email(f"MACD 黃金交叉通知 - {today}", body)
+    print("通知已寄出!")
+
+if __name__ == "__main__":
+    main()
